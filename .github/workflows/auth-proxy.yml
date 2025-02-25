@@ -38,22 +38,28 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Build Docker Image
-        run: docker build -t registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }} .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
         with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GH_TOKEN }}
 
-      - name: Log in to DO Container Registry
-        run: doctl registry login --expiry-seconds 600
-
-      - name: Push image to DO Container Registry
-        run: |
-          docker push registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }}
-          docker tag registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }} registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:latest
-          docker push registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:latest
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/auth-proxy:latest
+            ghcr.io/${{ github.repository_owner }}/auth-proxy:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/auth-proxy:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/auth-proxy:buildcache,mode=max
+          build-args: |
+            NODE_ENV=production
 
   deploy:
     needs: build-and-push
@@ -98,8 +104,22 @@ jobs:
             NODE_ENV=production
             EOF
 
-            # Log into registry
-            doctl registry login --expiry-seconds 600
+            # Create or update docker-compose.yml
+            cat > docker-compose.yml << EOF
+            version: '3'
+
+            services:
+              authproxy:
+                image: ghcr.io/${{ github.repository_owner }}/auth-proxy:${{ github.sha }}
+                ports:
+                  - "3000:3000"
+                env_file:
+                  - .env
+                restart: unless-stopped
+            EOF
+
+            # Log into GitHub Container Registry
+            echo ${{ secrets.GH_TOKEN }} | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
 
             # Deploy
             docker compose pull
