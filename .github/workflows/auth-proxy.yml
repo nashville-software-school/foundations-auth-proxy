@@ -1,53 +1,96 @@
-name: Auth Proxy CI/CD
+name: Deploy Auth Proxy
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'server.js'
-      - '.github/workflows/auth-proxy.yml'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/**'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Log in to DigitalOcean Container Registry
-        uses: docker/login-action@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          registry: ${{ secrets.DOCKER_REGISTRY }}
-          username: ${{ secrets.DO_USERNAME }}
-          password: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          node-version: '18'
+          cache: 'npm'
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v4
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: |
+          npm test
+        continue-on-error: true  # Since tests may not be implemented yet
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Docker Image
+        run: docker build -t registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }} .
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
         with:
-          context: ./auth-proxy
-          push: true
-          tags: ${{ secrets.DOCKER_REGISTRY }}/auth-proxy:latest,${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }}
-          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/auth-proxy:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/auth-proxy:buildcache,mode=max
-          build-args: |
-            NODE_ENV=production
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Deploy to DigitalOcean Droplet
+      - name: Log in to DO Container Registry
+        run: doctl registry login --expiry-seconds 600
+
+      - name: Push image to DO Container Registry
+        run: |
+          docker push registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }}
+          docker tag registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }} registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:latest
+          docker push registry.digitalocean.com/${{ secrets.DOCKER_REGISTRY }}/auth-proxy:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Create deployment directory and files on droplet
         uses: appleboy/ssh-action@master
         with:
           host: authproxy.nss.team
           username: ${{ secrets.DO_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Create deployment script
             mkdir -p /opt/authproxy
 
-            # Update environment variables
-            cat > /opt/authproxy/.env <<EOF
+      - name: Copy deployment files to droplet
+        uses: appleboy/scp-action@master
+        with:
+          host: authproxy.nss.team
+          username: ${{ secrets.DO_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml"
+          target: "/opt/authproxy"
+          strip_components: 0
+
+      - name: Deploy to Digital Ocean droplet
+        uses: appleboy/ssh-action@master
+        with:
+          host: authproxy.nss.team
+          username: ${{ secrets.DO_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/authproxy
+
+            # Create or update .env file
+            cat > .env << EOF
             PORT=3000
             OAUTH_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
             OAUTH_CLIENT_SECRET=${{ secrets.OAUTH_CLIENT_SECRET }}
@@ -55,26 +98,22 @@ jobs:
             NODE_ENV=production
             EOF
 
-            # Create or update docker-compose.yml
-            cat > /opt/authproxy/docker-compose.yml <<EOF
-            version: '3'
+            # Log into registry
+            doctl registry login --expiry-seconds 600
 
-            services:
-              authproxy:
-                image: ${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }}
-                ports:
-                  - "3000:3000"
-                env_file:
-                  - .env
-                restart: unless-stopped
-            EOF
-
-            # Pull and start the container
-            cd /opt/authproxy
-            docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DO_USERNAME }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-            docker pull ${{ secrets.DOCKER_REGISTRY }}/auth-proxy:${{ github.sha }}
-            docker-compose down
-            docker-compose up -d
+            # Deploy
+            docker compose pull
+            docker compose up -d
 
             # Clean up old images
-            docker image prune -af --filter "until=24h"
+            docker image prune -f
+
+      - name: Notify Slack of Deployment
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
+          text: "Auth Proxy deployment ${{ job.status }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
