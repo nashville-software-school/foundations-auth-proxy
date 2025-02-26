@@ -14,7 +14,7 @@ COPY . .
 FROM nginx:alpine
 
 # Install Node.js in the Nginx image
-RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache nodejs npm openssl
 
 # Create app directory and copy from build stage
 WORKDIR /app
@@ -22,6 +22,9 @@ COPY --from=nodejs-build /app /app
 
 # Copy Nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Create directories for SSL certificates
+RUN mkdir -p /etc/nginx/ssl
 
 # Copy startup script
 COPY start.sh /start.sh

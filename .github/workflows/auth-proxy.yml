@@ -107,9 +107,8 @@ jobs:
                 env_file:
                   - .env
                 volumes:
-                volumes:
-                  - /etc/letsencrypt/live/authproxy.nss.team/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
-                  - /etc/letsencrypt/live/authproxy.nss.team/privkey.pem:/etc/ssl/private/privkey.pem:ro
+                  - /etc/letsencrypt/live/authproxy.nss.team/fullchain.pem:/etc/ssl/certs/authproxy.fullchain.pem:ro
+                  - /etc/letsencrypt/live/authproxy.nss.team/privkey.pem:/etc/ssl/private/authproxy.privkey.pem:ro
                 restart: unless-stopped
             EOF
 
