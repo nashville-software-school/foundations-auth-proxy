@@ -98,8 +98,6 @@ jobs:
 
             # Create or update docker-compose.yml
             cat > docker-compose.yml << EOF
-            version: '3'
-
             services:
               authproxy:
                 image: ghcr.io/${{ github.repository_owner }}/auth-proxy:${{ github.sha }}
@@ -109,8 +107,9 @@ jobs:
                 env_file:
                   - .env
                 volumes:
-                  - /etc/ssl/certs/authproxy.fullchain.pem:/etc/ssl/certs/authproxy.fullchain.pem:ro
-                  - /etc/ssl/private/authproxy.privkey.pem:/etc/ssl/private/authproxy.privkey.pem:ro
+                volumes:
+                  - /etc/letsencrypt/live/authproxy.nss.team/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
+                  - /etc/letsencrypt/live/authproxy.nss.team/privkey.pem:/etc/ssl/private/privkey.pem:ro
                 restart: unless-stopped
             EOF
 
