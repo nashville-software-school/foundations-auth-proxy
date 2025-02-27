@@ -278,17 +278,21 @@ If you want to run your own instance of this proxy:
    ALLOWED_ORIGINS=https://your-frontend-app.com,http://localhost:3000
    ```
 
-4. **Run with Docker**:
-   ```
-   docker build -t oauth-proxy .
-   docker run -p 80:80 -p 443:443 --env-file .env oauth-proxy
-   ```
-
-   Or without Docker:
+4. **Install dependencies**:
    ```
    npm install
-   npm start
    ```
+
+5. **Run the application**:
+
+   For development with auto-restart on file changes:
+   ```
+   npm run dev
+   ```
+
+6. **Verify the server is running**:
+   - The server will output: `OAuth proxy server running on port 3000` (or your configured port)
+   - You can test the health endpoint by visiting: `http://localhost:3000/health`
 
 ## Contributing
 
