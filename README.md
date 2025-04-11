@@ -272,10 +272,10 @@ If you want to run your own instance of this proxy:
 
 3. **Create a .env file**:
    ```
-   PORT=3000
+   PORT=3003
    OAUTH_CLIENT_ID=your_github_client_id
    OAUTH_CLIENT_SECRET=your_github_client_secret
-   ALLOWED_ORIGINS=https://your-frontend-app.com,http://localhost:3000
+   ALLOWED_ORIGINS=http://localhost:3000
    ```
 
 4. **Install dependencies**:
@@ -285,14 +285,14 @@ If you want to run your own instance of this proxy:
 
 5. **Run the application**:
 
-   For development with auto-restart on file changes:
+   For development:
    ```
-   npm run dev
+   node server.js
    ```
 
 6. **Verify the server is running**:
-   - The server will output: `OAuth proxy server running on port 3000` (or your configured port)
-   - You can test the health endpoint by visiting: `http://localhost:3000/health`
+   - The server will output: `OAuth proxy server running on port 3003` (or your configured port)
+   - You can test the health endpoint by visiting: `http://localhost:3003/health`
 
 ## Contributing
 
