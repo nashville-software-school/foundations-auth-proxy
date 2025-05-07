@@ -167,6 +167,8 @@ This job:
 
 ### Deployment Phase
 
+For these steps, you'll need the private SSH key that is used for the **root** account on the VPS as a repo secret named `SSH_PRIVATE_KEY`. Right now, this is coupled to a Digital Ocean droplet so if you want to deploy to AWS or other cloud provider, this particular action would need to be swapped out.
+
 The deployment section is more complex:
 
 ```yaml

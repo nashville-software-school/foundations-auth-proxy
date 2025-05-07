@@ -71,8 +71,20 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write  # Required for generating a token for the server login
     steps:
       - uses: actions/checkout@v3
+
+      - name: Generate deployment token
+        id: generate-token
+        run: |
+          # Generate a token for container registry access
+          TOKEN=$(echo ${{ github.token }})
+          echo "::add-mask::$TOKEN"
+          echo "TOKEN=$TOKEN" >> $GITHUB_OUTPUT
 
       - name: Create deployment directory and files on droplet
         uses: appleboy/ssh-action@master
@@ -117,8 +129,8 @@ jobs:
                 restart: unless-stopped
             EOF
 
-            # Log into GitHub Container Registry
-            echo ${{ secrets.GH_TOKEN }} | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+            # Log into GitHub Container Registry using the generated token
+            echo '${{ steps.generate-token.outputs.TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Deploy
             docker compose pull
