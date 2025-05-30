@@ -126,8 +126,10 @@ jobs:
                 volumes:
                   - /etc/letsencrypt/live/authproxy.nss.team/fullchain.pem:/etc/nginx/ssl/live/authproxy.fullchain.pem:ro
                   - /etc/letsencrypt/live/authproxy.nss.team/privkey.pem:/etc/nginx/ssl/live/authproxy.privkey.pem:ro
+                  - /var/www/certbot:/var/www/certbot:ro
                 restart: unless-stopped
             EOF
+
 
             # Log into GitHub Container Registry using the generated token
             echo '${{ steps.generate-token.outputs.TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin
