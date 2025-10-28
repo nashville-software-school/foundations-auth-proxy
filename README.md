@@ -21,6 +21,15 @@ When a user wants to authenticate with GitHub in your web application:
 5. The proxy returns the access token to your client app
 6. Your client app can now use this token to make authenticated API requests to GitHub
 
+## Secrets Needed
+
+Look in the `auth-proxy.yml` file to see all of the Github Action secrets needed.
+
+Current list of allowed origins. Update this is there's any domain in the future that will use the auth proxy.
+
+1. https://nashville-software-school.github.io
+2. https://nss-workshops.github.io
+
 ## Authentication Flow Diagram
 
 ```mermaid
