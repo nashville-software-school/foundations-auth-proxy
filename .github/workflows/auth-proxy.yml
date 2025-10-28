@@ -109,7 +109,7 @@ jobs:
             PORT=3000
             OAUTH_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
             OAUTH_CLIENT_SECRET=${{ secrets.OAUTH_CLIENT_SECRET }}
-            ALLOWED_ORIGINS=https://nashville-software-school.github.io
+            ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS}}
             NODE_ENV=production
             EOF
 
