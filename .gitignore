@@ -1,2 +1,7 @@
 .env*
 node_modules
+
+.roo/
+.roomodes
+context_portal/
+memory-bank/
