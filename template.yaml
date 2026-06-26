@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: NSS GitHub OAuth Proxy - multi-site serverless deployment
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: nodejs18.x
+
+Resources:
+  AuthProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: nss-auth-proxy
+      Handler: lambda.handler
+      CodeUri: .
+      Description: GitHub OAuth token proxy supporting multiple NSS sites
+      Environment:
+        Variables:
+          NODE_ENV: production
+          SITES_SECRETS_SECRET_ID: nss-auth-proxy/sites-secrets
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:nss-auth-proxy/sites-secrets*'
+      Events:
+        ProxyRoot:
+          Type: HttpApi
+          Properties:
+            Path: /
+            Method: ANY
+        ProxyAll:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway HTTP endpoint URL
+    Value: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref AuthProxyFunction

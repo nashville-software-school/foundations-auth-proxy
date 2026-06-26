@@ -1,57 +1,105 @@
 const express = require('express');
-const cors = require('cors');
 const fetch = require('node-fetch');
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 
-// Environment variables
-const PORT = process.env.PORT || 3000;
-const CLIENT_ID = process.env.OAUTH_CLIENT_ID;
-const CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS.split(',');
+// Load non-secret site config from repo (allowed origins, descriptions)
+const sitesConfig = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'sites.json'), 'utf8')
+);
 
-// Validate environment variables
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error('Missing required environment variables: OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET must be set');
-  process.exit(1);
+// In Lambda: pulled from Secrets Manager on cold start.
+// Locally: falls back to SITES_SECRETS env var (plain JSON).
+let siteSecrets = {};
+
+async function loadSiteSecrets() {
+  const secretId = process.env.SITES_SECRETS_SECRET_ID;
+  if (secretId) {
+    const client = new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-2' });
+    const response = await client.send(new GetSecretValueCommand({ SecretId: secretId }));
+    siteSecrets = JSON.parse(response.SecretString);
+    return;
+  }
+
+  // Local dev fallback
+  const raw = process.env.SITES_SECRETS;
+  if (!raw) return;
+  try {
+    siteSecrets = JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to parse SITES_SECRETS:', e.message);
+    process.exit(1);
+  }
 }
 
-// Create Express app
+// Load dotenv before kicking off secrets fetch so env vars are available
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  require('dotenv').config({ override: false });
+}
+
+// Resolves once on cold start; subsequent Lambda invocations await the cached promise
+const secretsReady = loadSiteSecrets().catch(e => {
+  console.error('Failed to load secrets:', e.message);
+  process.exit(1);
+});
+
+const PORT = process.env.PORT || 3000;
+
 const app = express();
-
-// Configure CORS
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-
-    if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || ALLOWED_ORIGINS.includes('*')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept']
-};
-
-// Apply middleware
-app.use(cors(corsOptions));
 app.use(express.json());
 
-// Routes
+// Per-request CORS based on the site making the call
+app.use((req, res, next) => {
+  const siteId = req.headers['x-site-id'];
+  const origin = req.headers.origin;
+
+  if (!origin) return next();
+
+  // Browsers don't send X-Site-ID in the OPTIONS preflight, so fall back to
+  // checking the origin against all sites. The actual POST still validates per-site.
+  const allowedOrigins = siteId
+    ? (sitesConfig[siteId] ? sitesConfig[siteId].allowedOrigins : [])
+    : Object.values(sitesConfig).flatMap(s => s.allowedOrigins);
+
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, X-Site-ID');
+  } else {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+
+  if (req.method === 'OPTIONS') return res.status(204).send();
+  next();
+});
+
 app.post('/oauth/github/token', async (req, res) => {
   try {
-    const { code, redirect_uri } = req.body;
+    const siteId = req.headers['x-site-id'];
 
-    // Validate required parameters
+    if (!siteId) {
+      return res.status(400).json({ error: 'Missing X-Site-ID header' });
+    }
+
+    if (!sitesConfig[siteId]) {
+      return res.status(400).json({ error: `Unknown site: ${siteId}` });
+    }
+
+    const secrets = siteSecrets[siteId];
+    if (!secrets || !secrets.clientId || !secrets.clientSecret) {
+      console.error(`No credentials configured for site: ${siteId}`);
+      return res.status(500).json({ error: `Credentials not configured for site: ${siteId}` });
+    }
+
+    const { code, redirect_uri } = req.body;
     if (!code) {
       return res.status(400).json({ error: 'Missing code parameter' });
     }
 
-    console.log(`Processing OAuth token exchange for code: ${code.substring(0, 4)}...`);
-    console.log(`Redirect URI: ${redirect_uri}`);
+    console.log(`[${siteId}] Processing OAuth token exchange for code: ${code.substring(0, 4)}...`);
 
-    // Exchange code for token with GitHub
     const response = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
@@ -59,17 +107,16 @@ app.post('/oauth/github/token', async (req, res) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        code: code,
-        redirect_uri: redirect_uri
+        client_id: secrets.clientId,
+        client_secret: secrets.clientSecret,
+        code,
+        redirect_uri
       })
     });
 
-    // Handle GitHub API errors
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`GitHub API error: ${response.status} ${errorText}`);
+      console.error(`[${siteId}] GitHub API error: ${response.status} ${errorText}`);
       return res.status(response.status).json({
         error: 'GitHub API error',
         status: response.status,
@@ -77,16 +124,14 @@ app.post('/oauth/github/token', async (req, res) => {
       });
     }
 
-    // Parse and return the token data
     const data = await response.json();
 
-    // Check for error in response
     if (data.error) {
-      console.error(`GitHub API returned error: ${data.error}`);
+      console.error(`[${siteId}] GitHub returned error: ${data.error}`);
       return res.status(400).json(data);
     }
 
-    console.log('Token exchange completed successfully');
+    console.log(`[${siteId}] Token exchange completed successfully`);
     return res.status(200).json(data);
   } catch (error) {
     console.error(`OAuth error: ${error.message}`);
@@ -97,13 +142,18 @@ app.post('/oauth/github/token', async (req, res) => {
   }
 });
 
-// Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
+  res.status(200).json({ status: 'healthy', sites: Object.keys(sitesConfig) });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`OAuth proxy server running on port ${PORT}`);
-  console.log(`Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
-});
+// Run as a standalone server when not in Lambda
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  secretsReady.then(() => {
+    app.listen(PORT, () => {
+      console.log(`OAuth proxy running on port ${PORT}`);
+      console.log(`Configured sites: ${Object.keys(sitesConfig).join(', ')}`);
+    });
+  });
+}
+
+module.exports = { app, secretsReady };

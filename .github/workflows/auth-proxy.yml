@@ -1,18 +1,14 @@
-name: Deploy Auth Proxy
+# DEACTIVATED: This workflow deployed to DigitalOcean (Docker/SSH).
+# It has been replaced by deploy-aws.yml (AWS Lambda via SAM).
+# Kept here for historical reference. Trigger is manual-only so it never runs automatically.
+name: Deploy Auth Proxy (DigitalOcean - DEACTIVATED)
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'server.js'
-      - 'Dockerfile'
-      - 'nginx.conf'
-      - 'start.sh'
-      - 'docker-compose.yml'
-      - '.github/workflows/**'
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to run this deactivated workflow'
+        required: true
 
 jobs:
   test:
