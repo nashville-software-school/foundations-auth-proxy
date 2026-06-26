@@ -33,18 +33,23 @@ jobs:
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # This is the crucial permission for OIDC
+
     steps:
       - uses: actions/checkout@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to the Container registry
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GH_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
@@ -62,8 +67,20 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write  # Required for generating a token for the server login
     steps:
       - uses: actions/checkout@v3
+
+      - name: Generate deployment token
+        id: generate-token
+        run: |
+          # Generate a token for container registry access
+          TOKEN=$(echo ${{ github.token }})
+          echo "::add-mask::$TOKEN"
+          echo "TOKEN=$TOKEN" >> $GITHUB_OUTPUT
 
       - name: Create deployment directory and files on droplet
         uses: appleboy/ssh-action@master
@@ -88,7 +105,7 @@ jobs:
             PORT=3000
             OAUTH_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
             OAUTH_CLIENT_SECRET=${{ secrets.OAUTH_CLIENT_SECRET }}
-            ALLOWED_ORIGINS=https://nashville-software-school.github.io
+            ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS}}
             NODE_ENV=production
             EOF
 
@@ -105,11 +122,14 @@ jobs:
                 volumes:
                   - /etc/letsencrypt/live/authproxy.nss.team/fullchain.pem:/etc/nginx/ssl/live/authproxy.fullchain.pem:ro
                   - /etc/letsencrypt/live/authproxy.nss.team/privkey.pem:/etc/nginx/ssl/live/authproxy.privkey.pem:ro
+                  - /var/www/certbot:/var/www/certbot:ro
+                  - /etc/letsencrypt:/etc/letsencrypt:ro
                 restart: unless-stopped
             EOF
 
-            # Log into GitHub Container Registry
-            echo ${{ secrets.GH_TOKEN }} | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+            # Log into GitHub Container Registry using the generated token
+            echo '${{ steps.generate-token.outputs.TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Deploy
             docker compose pull

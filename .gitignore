@@ -2,3 +2,7 @@
 !.env.example
 node_modules
 .aws-sam/
+.roo/
+.roomodes
+context_portal/
+memory-bank/

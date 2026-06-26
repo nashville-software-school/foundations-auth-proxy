@@ -11,6 +11,48 @@ It supports **multiple sites** from a single deployment. Each request identifies
 ```
 Client App  →  POST /oauth/github/token  →  Proxy Lambda  →  GitHub
                (with X-Site-ID header)       (adds client secret)
+
+When a user wants to authenticate with GitHub in your web application:
+
+1. Your client app redirects the user to GitHub's OAuth authorization page
+2. After the user authorizes your app, GitHub redirects back to your app with an authorization code
+3. Your client app sends this code to this proxy server
+4. The proxy server (which has the client secret) exchanges the code for an access token with GitHub
+5. The proxy returns the access token to your client app
+6. Your client app can now use this token to make authenticated API requests to GitHub
+
+## Secrets Needed
+
+Look in the `auth-proxy.yml` file to see all of the Github Action secrets needed.
+
+Current list of allowed origins. Update this is there's any domain in the future that will use the auth proxy.
+
+1. https://nashville-software-school.github.io
+2. https://nss-workshops.github.io
+
+## Authentication Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant ClientApp as Client Application
+    participant Proxy as OAuth Proxy Server
+    participant GitHub
+
+    User->>ClientApp: Clicks "Login with GitHub"
+    ClientApp->>GitHub: Redirects to GitHub OAuth page<br/>(with client_id & redirect_uri)
+    GitHub->>User: Displays authorization prompt
+    User->>GitHub: Approves authorization
+    GitHub->>ClientApp: Redirects back with authorization code
+
+    ClientApp->>Proxy: POST /oauth/github/token<br/>(sends code & redirect_uri)
+    Proxy->>GitHub: POST to /login/oauth/access_token<br/>(sends code, client_id, client_secret)
+    GitHub->>Proxy: Returns access token
+    Proxy->>ClientApp: Returns access token
+
+    ClientApp->>ClientApp: Stores token, updates UI as authorized
+    ClientApp->>GitHub: Makes API requests with access token
+    GitHub->>ClientApp: Returns requested data
 ```
 
 1. User clicks "Login with GitHub" in your app
@@ -69,6 +111,9 @@ See [Managing Secrets](#managing-secrets) below for the CLI commands to create a
 ---
 
 ## Adding a New Site
+For these steps, you'll need the private SSH key that is used for the **root** account on the VPS as a repo secret named `SSH_PRIVATE_KEY`. Right now, this is coupled to a Digital Ocean droplet so if you want to deploy to AWS or other cloud provider, this particular action would need to be swapped out.
+
+The deployment section is more complex:
 
 1. **Create a GitHub OAuth App**
    - GitHub → Settings → Developer Settings → OAuth Apps → New OAuth App
